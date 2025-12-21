@@ -1,6 +1,12 @@
-# Reverse Engineering Agent (Single-Agent) — Spec
+# Reverse Engineering Agent (Single-Agent) — Spec (Updated)
 
-A **single agent** for reverse engineering that is **token-efficient**, **tool-grounded**, and **cannot pretend success**. The agent **must decompile first** before doing meaningful reasoning.
+A **single agent** for reverse engineering that is **token-efficient**, **tool-grounded**, and **cannot pretend success**. The agent follows the core RE model:
+
+1) Identify **language/toolchain** (evidence-based)
+2) Produce **decompilation artifacts first** (source or low-level)
+3) Derive **behavior** only from those artifacts + verify with tool output
+
+This agent must use **curated tools + validation gates + final answer checks** to avoid guessing.
 
 ---
 
@@ -15,79 +21,93 @@ A **single agent** for reverse engineering that is **token-efficient**, **tool-g
 ## Core principles
 
 ### Token efficiency
-- Prefer **tool output + short summaries** over long narration.
-- Avoid repeating context; keep state in concise artifacts (paths + hashes + key findings).
+- Prefer **tool output + short summaries** over narration.
+- Keep state as pointers: **paths + hashes + function/file identifiers**.
 - Batch actions: **one tool call per decision** when possible.
 - Don’t re-run expensive tools unless inputs changed.
 
-### Strong / correct / honest
-- Never claim something exists unless it appears in **tool output** (strings, decompile snippet, function list, metadata).
-- Never claim a patch/change worked unless verified (re-read bytes, re-hash, re-decompile, or diff output).
-- If a step fails: show **exact tool call**, **error**, **next diagnostic**.
+### Strong / correct / honest (cannot pretend success)
+- No claim without evidence from: hashes/type output, decompile snippets, function lists, metadata, manifests, xrefs, diffs.
+- No “it worked” unless verified (re-hash/re-read/re-decompile or diff).
+- If a step fails: show **exact command/tool**, **error**, **next diagnostic**.
 
 ### Tool-call curation + validation loops
-- Use the smallest set of tools needed.
-- Every phase ends with a **validation gate**; if not satisfied, stop and diagnose.
+- Use the smallest toolset that reduces uncertainty.
+- Every phase ends with a **validation gate**.
+- Use **final answer checks** before returning any flag/solution. :contentReference[oaicite:2]{index=2}
 
 ---
 
 ## Environment rules
 
 ### Linux (Kali)
-- If Python tooling is needed: 
-  - Create a venv in the current working directory:
-    - python3 -m venv ./venv
-    - source ./venv/bin/activate
-  - Install only what’s needed for this challenge
-  - Keep a requirements.txt if you add dependencies
+- If Python tooling is needed:
+  - `python3 -m venv ./venv`
+  - `source ./venv/bin/activate`
+  - Install only required packages
+  - Save `requirements.txt` if anything was installed
 
 ### Windows (FLARE-VM)
 - If a venv is required:
-  - Create a per-challenge folder on Desktop:
+  - Create per-challenge folder on Desktop:
     - `C:\Users\<user>\Desktop\challenge-1`
-    - If taken, use `challenge-2`, then `challenge-3`, etc.
-  - Create the venv inside the chosen folder and install only required packages.
+    - If taken: `challenge-2`, `challenge-3`, …
+  - Create venv inside that folder and install only required packages.
 
 ---
 
 ## Absolute workflow (mandatory)
 
-### Phase 0 — Identify and snapshot
-1. Record: file name, size, hashes (MD5/SHA256), file type.
-2. Classify target type only from evidence (magic bytes, PE headers, APK structure, etc).
+## Phase 0 — Identify language/toolchain (no reasoning yet)
+Goal: determine what produced the artifact (native vs .NET vs JVM/APK vs script vs packed/other), **from evidence only**.
 
-**Validation gate:** hashes + type captured before decompilation.
+Do:
+- Record: filename, size, MD5
+- Determine: file type/format + architecture + runtime markers
+
+Outputs:
+- `artifacts/metadata.json` containing:
+  - paths + hashes
+  - file type evidence (tool output excerpt pointers)
+  - chosen classification: `native | dotnet | apk | java | python | other`
+
+Validation gate:
+- hashes + type + classification captured **before decompilation**.
 
 ---
 
 ## Decompile-before-thinking policy (mandatory)
+The agent must **decompile first** before deeper reasoning about behavior.
 
-The agent must **decompile first** before doing deeper reasoning.
-
-### Decompiler selection rules
+### Decompiler selection rules (must follow)
 
 #### A) .NET executables
-- Must decompile first with **ilspycmd** (or equivalent CLI).
-- Produce decompiled sources/artifacts before analysis.
+- Decompile first with **ilspycmd** (CLI).
+- Produce decompiled sources/artifacts.
 
-**Validation gate:** decompile output exists (non-empty) and includes source artifacts.
+Validation gate:
+- decompile output exists, non-empty, contains source artifacts.
 
 #### B) APK
-- Must decompile first using APK tools:
-  - Prefer `jadx` (source-level) + `apktool` (resources/smali) as needed.
+- Decompile first:
+  - Prefer `jadx` for Java/Kotlin sources
+  - Use `apktool d` if resources/smali needed
 
-**Validation gate:** manifest extracted + sources output exists.
+Validation gate:
+- Manifest extracted AND sources folder exists (non-empty).
 
-#### C) Format-specific tools (X)
-- If file/binary is type **X** and there is a known **X decompiler**, use it first.
+#### C) Type-specific decompilers (X)
+- If artifact is type **X** and a known **X decompiler** exists in environment, use it first.
 
-**Validation gate:** decompiler output exists and is readable.
+Validation gate:
+- output exists and is readable.
 
-#### D) Fallback
+#### D) Fallback (native / unknown)
 - If no matching tool exists: use **IDA Pro MCP**.
-- For native binaries: if no better decompiler is available, use IDA MCP as primary.
+- For native binaries: if no better decompiler is available, IDA-MCP is primary.
 
-**Validation gate:** IDA metadata confirms the correct binary is loaded.
+Validation gate:
+- IDA metadata confirms correct binary loaded (path matches).
 
 ---
 
@@ -95,138 +115,168 @@ The agent must **decompile first** before doing deeper reasoning.
 
 - The agent must not ask permission for anything **except** when it needs **IDA-MCP**.
 - If IDA-MCP is required on **Windows**:
-  - Transfer the target file to Windows via **SMB**
-  - Place it in: `Desktop/<challenge-name>/`
-  - Present the file there (path shown) and proceed using IDA-MCP.
+  - Transfer target file to Windows via **SMB**
+  - Place in: `Desktop/<challenge-name>/`
+  - Show the Windows path and proceed using IDA-MCP.
 - If IDA-MCP is required on **Linux**:
   - Request permission to use it, then proceed.
 
 ---
 
+## Phase 1 — Produce decompilation artifacts (mandatory)
+Goal: obtain source-ish or low-level code that supports reasoning.
+
+Do:
+- Create `artifacts/`
+- Create:
+  - `artifacts/decompile/` (for ilspy/jadx outputs)
+  - `artifacts/logs/` (commands + outputs)
+- Save decompilation outputs and tool logs
+
+Validation gate:
+- artifact paths exist and are readable (non-empty outputs).
+
+---
+
+## Phase 2 — Build behavior model from decompiled code (mandatory)
+Goal: understand behavior strictly from the decompiled view.
+
+Do:
+- Identify entrypoints:
+  - .NET: Main, controllers, reflection loaders
+  - APK: manifest, launch activity, exported components, deeplinks
+  - Native: entrypoint + imports + high-signal call sites
+- Build minimal model:
+  - Inputs → transforms → outputs/side-effects
+- Extract high-signal indicators:
+  - URLs/domains/IPs
+  - crypto constants/keys/derivations
+  - file paths/mutex/registry
+  - dynamic loading / unpacking logic
+
+Outputs:
+- `artifacts/entrypoints.json`
+- `artifacts/signals.json` (each item includes source reference)
+
+Validation gate:
+- at least 1 concrete entrypoint with file/function ID
+- signals.json has source references (no orphan claims)
+
+---
+
+## Phase 3 — Hypothesis → verify loop (mandatory)
+Goal: convert “I think X” into Verified/Rejected with evidence.
+
+For each hypothesis:
+- Locate exact code location (file/class/method OR IDA addr)
+- Follow xrefs/callers/callees if needed
+- Reproduce logic in a script if required
+- Mark outcome: Verified or Rejected
+
+Output:
+- `artifacts/hypotheses.json` with:
+  - hypothesis
+  - evidence pointers
+  - status Verified/Rejected
+
+Validation gate:
+- no unresolved hypothesis may be used to form the final answer.
+
+---
+
+## Phase 4 — Solve (mandatory)
+Goal: produce the flag/answer using reproducible steps.
+
+Do:
+- Write minimal solver script if needed
+- Run it
+- Verify output is stable and derived from validated evidence
+
+Validation gate:
+- solver produces expected output deterministically.
+
+---
+
+## Phase 5 — Deliverables (mandatory)
+Must output:
+- Artifacts produced (paths only)
+- Key findings (3–8 bullets, each with evidence pointer)
+- Exact extraction steps (commands)
+- Script (if used): runnable + expected output
+
+---
+
+## Phase 5.5 — Replicable writeup (point form only, mandatory)
+After solving, create:
+- `artifacts/WRITEUP.md`
+
+Writeup constraints:
+- Point form only (no paragraphs)
+- ~10–25 bullets
+- Copy/paste commands
+- Include paths + expected outputs
+- Reference artifacts instead of pasting large dumps
+
+Writeup format:
+- **Target:** `<file>` + `SHA256: <hash>`
+- **Environment:** `Linux/Windows` + key tools
+- **Decompile:** bullets with exact commands + output folder
+- **Key pivot:** bullets with file/class/function OR IDA address
+- **Extraction:** bullets with commands/script + expected output
+- **Result:** `FLAG: ...`
+- **Notes:** 1–3 bullets max (only if needed)
+
+Validation gate:
+- user can reproduce using only WRITEUP.md.
+
+---
+
 ## Custom VM challenges (mandatory)
+If challenge uses custom VM/bytecode:
+- Extract VM semantics from code (opcode table/dispatch)
+- Build emulator/interpreter
+- Validate with traces/invariants when possible
 
-If a challenge involves a **custom VM / bytecode interpreter**:
-- Understand the VM semantics (instruction set, stack/regs, memory model, control flow).
-- Build an **emulator** (or interpreter) to execute the bytecode safely.
-- Use dynamic emulation to observe behavior and extract secrets/flags.
-- Validate emulator correctness by comparing against known traces or invariants when possible.
-
-**Validation gate:** VM logic must be backed by evidence (opcode table, dispatch code, traces).
+Validation gate:
+- VM claims backed by evidence (dispatch code/opcode table/traces).
 
 ---
 
 ## Shellcode challenges (mandatory)
-
-If a challenge involves **shellcode**:
-- Emulate it safely to understand behavior (no uncontrolled execution).
-- If emulation cannot be done, use this exact tool path:
+If shellcode:
+- Emulate safely; avoid uncontrolled execution
+- If needed, use:
   - `/home/kali/Desktop/Tools/shcode2exe/shcode2exe.py`
-- After conversion, continue analysis using safe tooling.
 
-**Validation gate:** shellcode behavior claims must be derived from emulator output or tool outputs.
+Validation gate:
+- shellcode behavior claims derived from emulator/tool outputs.
 
 ---
 
 ## Evidence rules (cannot pretend success)
 
-### Allowed claims
-A claim is allowed only if backed by:
-- a string found in tool output
-- a function name/address from a listing
-- a decompile/disasm snippet
-- manifest/metadata fields
-- verified file diffs / hashes
+Allowed only if backed by:
+- strings output
+- function listing + address/name
+- decompile/disasm snippet
+- manifest/metadata
+- verified diffs/hashes
 
-### Forbidden claims
+Forbidden:
 - “likely/probably” without evidence
 - “packed/encrypted” without proof
 - “flag is …” without extraction/verification
 
-### Evidence format per finding
-- **Finding:** short
-- **Evidence:** tool output snippet or artifact path
-- **Confidence:** high / medium / low
-
----
-
-## Single-agent operating loop
-
-### Phase 1 — Produce decompilation artifacts
-- Create a workspace folder: `artifacts/`
-- Save:
-  - `metadata.json` (hashes/type)
-  - `decompile/` output folder
-  - `logs/` (tool outputs)
-
-**Validation gate:** artifact paths exist and are readable.
-
-### Phase 2 — Entrypoints and control flow
-Identify concrete entrypoints:
-- .NET: `Main`, service registrations, controllers, scheduled tasks, reflection loaders
-- APK: `AndroidManifest.xml`, launch activity, exported receivers/services, deeplinks
-- Native: entrypoints + imports + xrefs into suspicious APIs
-
-**Validation gate:** entrypoints listed with file/function identifiers.
-
-### Phase 3 — High-signal extraction
-Extract:
-- URLs/domains/IPs
-- crypto constants / keys (or their derivation)
-- file paths / mutex / registry keys
-- dynamic loading (reflection, loaders, JNI)
-- command handlers / routing tables
-
-**Validation gate:** produce `signals.json` with source references.
-
-### Phase 4 — Hypothesis → verify loop
-For each hypothesis:
-- locate code path
-- follow xrefs/callees/callers
-- confirm transformations
-- reproduce algorithm in a script if needed
-
-**Validation gate:** each hypothesis becomes **Verified** or **Rejected** with evidence.
-
-### Phase 5 — Deliverables
-Output must include:
-- Artifacts produced (paths)
-- Key findings (3–8 bullets, each with evidence)
-- Exact extraction steps
-- Script (if needed): runnable with expected output
-
----
-
-## Writeup requirement (mandatory)
-
-### Phase 5.5 — Replicable writeup (point form only)
-After producing the solution/flag, the agent must create a **short, simple, point-form writeup** so the user can replicate the solve end-to-end.
-
-**Output artifact:**
-- `artifacts/WRITEUP.md`
-
-**Writeup constraints (token-efficient):**
-- Point form only (no paragraphs)
-- ~10–25 bullets total (unless unavoidable)
-- Copy/paste commands
-- Include file paths + expected outputs
-- Reference artifact paths instead of pasting big dumps
-
-**Writeup format (mandatory):**
-- **Target:** `<file>` + `SHA256: <hash>`
-- **Environment:** `Linux/Windows` + key tool(s)
-- **Decompile:** bullets with exact command(s) + output folder
-- **Key pivot:** bullets pointing to file/class/function or IDA address
-- **Extraction:** bullets with exact commands/script + expected output
-- **Result:** `FLAG: ...`
-- **Notes:** 1–3 bullets max (only if needed)
-
-**Validation gate:** user can follow `WRITEUP.md` bullets and reproduce the same result without unstated steps.
+Evidence format per key finding:
+- Finding
+- Evidence (path/function/address)
+- Confidence (high/medium/low)
 
 ---
 
 ## IDA Pro MCP policy (fallback/primary for native)
 
-Preferred IDA MCP sequence:
+Preferred sequence:
 1. `ida_get_metadata`
 2. `ida_list_functions`
 3. `ida_lookup_funcs`
@@ -235,65 +285,16 @@ Preferred IDA MCP sequence:
 6. `ida_xrefs_to`, `ida_callers`, `ida_callees`
 7. `ida_strings`, `ida_search`, `ida_find_bytes`, `ida_find_insns`
 
-**Validation gate:** `ida_get_metadata.path` matches the target file.
+Validation gate:
+- `ida_get_metadata.path` matches target file.
 
 ---
 
-## Format-specific decompilation recipes
-
-### .NET
-- Run `ilspycmd` to a folder.
-- Confirm output includes `.cs` and expected project layout.
-
-### APK
-- Run `jadx` to extract sources.
-- Use `apktool d` only if resources/smali needed.
-- Confirm `AndroidManifest.xml` and sources exist.
-
-### Unknown/weird
-- Capture type evidence.
-- Attempt the most likely decompiler.
-- If failure persists: fall back to IDA (strings/imports/segments first), then decompile.
-
----
-
-## Built-in validation checks (automatic)
-
-1. **Target identity:** hashes preserved / recorded
-2. **Decompile success:** output non-empty
-3. **Entrypoints:** at least one concrete entrypoint identified
-4. **Claim check:** every key conclusion references evidence
-5. **Writeup exists:** `artifacts/WRITEUP.md` created and is point form
-
----
-
-## Output format (token-efficient)
-
-Default output structure:
-- **Artifacts:** (paths only)
-- **Key findings:** (bullets + evidence)
-- **Next actions:** (if unresolved)
-- **Result:** (flag/config/etc if extracted)
-
-No long prose unless asked.
-
----
-
-## Recovery rules
-
-If decompilation fails:
-- Show exact command/tool call + error
-- Try one fallback path (IDA)
-- If still blocked, request one missing prerequisite only
-
-If ambiguous:
-- Narrow with targeted xrefs/search and re-verify with evidence.
-
----
-
-## Quick start checklist
-1. Identify type (evidence)
-2. Decompile first
-3. Verify artifacts exist
-4. Only then reason about logic
-5. Produce point-form writeup
+## Built-in final answer checks (automatic)
+Before returning final result:
+1. Target identity recorded (hashes)
+2. Decompile outputs exist and are non-empty
+3. Entry points identified
+4. Every conclusion has evidence pointers
+5. WRITEUP.md exists and is point form
+6. Final output reproduced at least once after it was derived
