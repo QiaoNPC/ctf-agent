@@ -30,15 +30,10 @@ codex
 
 **Run MCP server on Kali**
 
-The MCP server script in this repo should be run on Kali:
+The MCP server script in this repo should be placed on Kali:
 
-- [flarevm.py](/mcp-servers/flarevm.py)
-
-Run it with Python 3:
-
-```bash
-python3 flarevm.py
-```
+- [flarevm.py](/mcp-servers/flarevm/flarevm.py)
+- [rag db server](/mcp-servers/ragdb/server.py)
 
 **IDA Pro compatibility**
 
@@ -55,6 +50,7 @@ nano ~/.zshrc
 Add the following at the end of the file:
 ```bash
 alias rev-agent='codex "$(cat /home/kali/Desktop/mcp/rev.md)" --ask-for-approval never --sandbox workspace-write'
+alias crypto-agent='codex "$(cat /home/kali/Desktop/mcp/crypto.md)" --ask-for-approval never --sandbox workspace-write'
 ```
 
 ```bash
@@ -68,4 +64,5 @@ Adjust the `cat` path if your `rev.md` is located elsewhere.
 Once you are done, you can register this MCP in Codex
 ```bash
 codex mcp add flarevm -- python3 /full/path/to/server.py
+codex mcp add ragdb -- python3 /full/path/to/server.py
 ```

@@ -1,0 +1,18 @@
+services:
+  postgres-vector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: postgres-vector
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: vectordb
+      POSTGRES_USER: vectoruser
+      POSTGRES_PASSWORD: vectorpass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:

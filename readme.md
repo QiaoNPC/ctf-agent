@@ -1,18 +1,23 @@
 
-## dllm ctf-agent
+## ctf-agent
 
-This repository provides tools and helpers to run an agent to solve CTFs
-This project is heavily inspired by [Ong Zi Xuan FlareVM MCP Server](https://github.com/zixuantemp/flarevm-mcp).
+ctf-agent provides a lightweight set of tools and helpers to run an automated agent for solving CTF challenges.
 
-**What it does**
-- Runs on Kali Linux and connects to a `flare-vm` MCP server.
-  
-**Quick setup**
-1. Set up `flare-vm` (see the full guide).
-2. Prepare a Kali instance (see the full guide).
+Overview
 
-For detailed setup instructions, see:
+- Supports solving reverse-engineering and cryptography challenges using native Kali Linux tools and optional Flare VM tooling for Windows-specific binaries.
+- Integrates with a `flare-vm` MCP server and a `rag-db` service to speed lookups and script generation.
 
-- [Flare VM setup](flare-vm-setup.md)
-- [Kali setup](kali-linux-setup.md)
+Features
+
+- Reverse engineering: automates analysis and testing of binaries using Kali or Flare VM tools.
+- Cryptography: uses `rag-db` for quick writeup lookups and reusable helper scripts.
+
+Quick start
+
+1. Set up Flare VM (if you need Windows tooling): see [Flare VM setup](flare-vm-setup.md).
+2. Prepare a Kali instance: see [Kali setup](kali-linux-setup.md).
+3. Start the agent and point it to your `flare-vm` MCP server and `rag-db`.
+
+For more details and advanced configuration, check the project docs in the `agent/` and `mcp-servers/` folders.
 
